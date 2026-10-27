@@ -1,0 +1,8 @@
+PyQt6>=6.5.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+# Optional for PDF export
+# reportlab>=4.0.0
+# Optional for SVG
+# svgwrite>=1.4.0

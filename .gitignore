@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.env
+.venv
+*.egg-info/
+dist/
+build/
+*.spec
+.DS_Store
+*.jpg
+*.png
+Parts_To_Print/
+LED_Placement_Output/

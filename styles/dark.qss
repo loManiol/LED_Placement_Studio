@@ -1,0 +1,184 @@
+/* LED Placement Studio – Dark Theme */
+
+QMainWindow, QWidget {
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+    font-family: "Segoe UI", "Inter", "Roboto", sans-serif;
+    font-size: 13px;
+}
+
+QGroupBox {
+    border: 1px solid #45475a;
+    border-radius: 8px;
+    margin-top: 12px;
+    padding-top: 10px;
+    font-weight: 600;
+    color: #89b4fa;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+}
+
+QLabel {
+    color: #bac2de;
+}
+
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit {
+    background-color: #313244;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: #cdd6f4;
+    selection-background-color: #89b4fa;
+}
+
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus,
+QComboBox:focus, QPlainTextEdit:focus {
+    border: 1px solid #89b4fa;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 24px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #313244;
+    border: 1px solid #45475a;
+    selection-background-color: #89b4fa;
+    color: #cdd6f4;
+}
+
+QPushButton {
+    background-color: #45475a;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    color: #cdd6f4;
+    font-weight: 600;
+}
+
+QPushButton:hover {
+    background-color: #585b70;
+}
+
+QPushButton:pressed {
+    background-color: #313244;
+}
+
+QPushButton#generateBtn {
+    background-color: #89b4fa;
+    color: #1e1e2e;
+}
+
+QPushButton#generateBtn:hover {
+    background-color: #b4befe;
+}
+
+QPushButton#exportBtn {
+    background-color: #a6e3a1;
+    color: #1e1e2e;
+}
+
+QPushButton#exportBtn:hover {
+    background-color: #94e2d5;
+}
+
+QPushButton#simulateBtn {
+    background-color: #f38ba8;
+    color: #1e1e2e;
+}
+
+QPushButton#simulateBtn:hover {
+    background-color: #eba0ac;
+}
+
+QPushButton#simulateBtn:disabled {
+    background-color: #45475a;
+    color: #6c7086;
+}
+
+QPushButton#stopBtn {
+    background-color: #fab387;
+    color: #1e1e2e;
+}
+
+QPushButton#stopBtn:hover {
+    background-color: #f9e2af;
+}
+
+QPushButton#stopBtn:disabled {
+    background-color: #45475a;
+    color: #6c7086;
+}
+
+QPushButton#dangerBtn {
+    background-color: #f38ba8;
+    color: #1e1e2e;
+}
+
+QCheckBox, QRadioButton {
+    spacing: 8px;
+    color: #cdd6f4;
+}
+
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1px solid #45475a;
+    background: #313244;
+}
+
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {
+    background: #89b4fa;
+    border-color: #89b4fa;
+}
+
+QSlider::groove:horizontal {
+    height: 6px;
+    background: #313244;
+    border-radius: 3px;
+}
+
+QSlider::handle:horizontal {
+    width: 16px;
+    height: 16px;
+    margin: -5px 0;
+    background: #89b4fa;
+    border-radius: 8px;
+}
+
+QStatusBar {
+    background-color: #181825;
+    color: #a6adc8;
+    border-top: 1px solid #313244;
+}
+
+QScrollArea {
+    border: none;
+    background: transparent;
+}
+
+QSplitter::handle {
+    background: #313244;
+    width: 3px;
+}
+
+QToolTip {
+    background-color: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+/* Canvas specific */
+QGraphicsView {
+    background-color: #11111b;
+    border: 1px solid #313244;
+    border-radius: 4px;
+}
