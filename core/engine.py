@@ -274,31 +274,40 @@ class CoreEngine:
         max_leds: int,
         pitch_min: float = 3.0,
         pitch_max: float = 30.0,
-        tol: int = 2,
+        tol: int = 3,
     ) -> Tuple[float, List[LEDPad]]:
         """
-        Binary search over pitch so that len(pads) ≈ max_leds.
+        Binary search over pitch so that len(pads) is as close as possible
+        to max_leds without exceeding it (prefer under over over).
+
         Returns (best_pitch, pads).
         """
-        lo, hi = pitch_min, pitch_max
-        best_pads: List[LEDPad] = []
-        best_pitch = pitch_max
+        lo = max(2.0, float(pitch_min))
+        hi = max(lo + 0.5, float(pitch_max))
 
-        for _ in range(18):  # enough iterations for float precision
+        best_pads: List[LEDPad] = []
+        best_pitch = hi
+        best_n = -1
+
+        for _ in range(20):
             mid = (lo + hi) / 2.0
             pads = self.place_leds(routing_mask, check_mask, mid)
             n = len(pads)
-            if n > max_leds + tol:
-                lo = mid  # too many → increase pitch
-            elif n < max_leds - tol:
-                hi = mid  # too few → decrease pitch
-            else:
-                return mid, pads
-            if n <= max_leds and (not best_pads or n > len(best_pads)):
+
+            # Keep densest solution that stays ≤ max_leds
+            if n <= max_leds and n > best_n:
                 best_pads = pads
                 best_pitch = mid
+                best_n = n
 
-        # final run with best_pitch
+            if n > max_leds:
+                lo = mid  # too dense → larger pitch
+            else:
+                hi = mid  # room for denser packing → smaller pitch
+
+            if abs(n - max_leds) <= tol and n <= max_leds:
+                return mid, pads
+
         if not best_pads:
             best_pads = self.place_leds(routing_mask, check_mask, best_pitch)
         return best_pitch, best_pads

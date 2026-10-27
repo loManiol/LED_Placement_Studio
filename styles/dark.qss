@@ -1,4 +1,4 @@
-/* LED Placement Studio – Dark Theme */
+/* LED Placement Studio – polished dark theme */
 
 QMainWindow, QWidget {
     background-color: #1e1e2e;
@@ -7,32 +7,66 @@ QMainWindow, QWidget {
     font-size: 13px;
 }
 
-QGroupBox {
-    border: 1px solid #45475a;
-    border-radius: 8px;
-    margin-top: 12px;
-    padding-top: 10px;
-    font-weight: 600;
+/* ---- Typography ---- */
+QLabel#pageTitle {
+    font-size: 26px;
+    font-weight: 700;
+    color: #cdd6f4;
+    letter-spacing: 0.5px;
+}
+
+QLabel#pageSubtitle {
+    font-size: 12px;
+    color: #6c7086;
+}
+
+QLabel#sectionLabel {
+    font-size: 12px;
+    font-weight: 700;
     color: #89b4fa;
+    letter-spacing: 0.8px;
 }
 
-QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 12px;
-    padding: 0 6px;
+QLabel#hintLabel {
+    font-size: 12px;
+    color: #a6adc8;
 }
 
-QLabel {
-    color: #bac2de;
+QLabel#metricBig {
+    font-size: 22px;
+    font-weight: 700;
+    color: #cdd6f4;
 }
 
+QLabel#metricCap {
+    font-size: 10px;
+    color: #6c7086;
+    letter-spacing: 0.5px;
+}
+
+/* ---- Cards ---- */
+QFrame#card {
+    background-color: #181825;
+    border: 1px solid #313244;
+    border-radius: 12px;
+}
+
+QFrame#metricCard {
+    background-color: #181825;
+    border: 1px solid #313244;
+    border-radius: 10px;
+    padding: 6px 12px;
+}
+
+/* ---- Inputs ---- */
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit {
     background-color: #313244;
     border: 1px solid #45475a;
-    border-radius: 6px;
-    padding: 6px 10px;
+    border-radius: 8px;
+    padding: 7px 10px;
     color: #cdd6f4;
     selection-background-color: #89b4fa;
+    min-height: 18px;
 }
 
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus,
@@ -50,12 +84,18 @@ QComboBox QAbstractItemView {
     border: 1px solid #45475a;
     selection-background-color: #89b4fa;
     color: #cdd6f4;
+    outline: none;
 }
 
+QPlainTextEdit {
+    padding: 10px;
+}
+
+/* ---- Buttons ---- */
 QPushButton {
     background-color: #45475a;
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 8px 16px;
     color: #cdd6f4;
     font-weight: 600;
@@ -69,13 +109,26 @@ QPushButton:pressed {
     background-color: #313244;
 }
 
+QPushButton:disabled {
+    background-color: #313244;
+    color: #6c7086;
+}
+
 QPushButton#generateBtn {
     background-color: #89b4fa;
     color: #1e1e2e;
+    font-size: 15px;
+    font-weight: 700;
+    border-radius: 10px;
 }
 
 QPushButton#generateBtn:hover {
     background-color: #b4befe;
+}
+
+QPushButton#generateBtn:disabled {
+    background-color: #45475a;
+    color: #6c7086;
 }
 
 QPushButton#exportBtn {
@@ -115,11 +168,19 @@ QPushButton#stopBtn:disabled {
     color: #6c7086;
 }
 
-QPushButton#dangerBtn {
-    background-color: #f38ba8;
-    color: #1e1e2e;
+QPushButton#ghostBtn {
+    background-color: transparent;
+    border: 1px solid #45475a;
+    color: #bac2de;
 }
 
+QPushButton#ghostBtn:hover {
+    background-color: #313244;
+    border-color: #89b4fa;
+    color: #cdd6f4;
+}
+
+/* ---- Checks / radios ---- */
 QCheckBox, QRadioButton {
     spacing: 8px;
     color: #cdd6f4;
@@ -133,39 +194,26 @@ QCheckBox::indicator, QRadioButton::indicator {
     background: #313244;
 }
 
+QRadioButton::indicator {
+    border-radius: 8px;
+}
+
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {
     background: #89b4fa;
     border-color: #89b4fa;
 }
 
-QSlider::groove:horizontal {
-    height: 6px;
-    background: #313244;
-    border-radius: 3px;
-}
-
-QSlider::handle:horizontal {
-    width: 16px;
-    height: 16px;
-    margin: -5px 0;
-    background: #89b4fa;
-    border-radius: 8px;
-}
-
+/* ---- Status / canvas ---- */
 QStatusBar {
     background-color: #181825;
     color: #a6adc8;
     border-top: 1px solid #313244;
 }
 
-QScrollArea {
-    border: none;
-    background: transparent;
-}
-
-QSplitter::handle {
-    background: #313244;
-    width: 3px;
+QGraphicsView {
+    background-color: #11111b;
+    border: 1px solid #313244;
+    border-radius: 10px;
 }
 
 QToolTip {
@@ -176,9 +224,6 @@ QToolTip {
     border-radius: 4px;
 }
 
-/* Canvas specific */
-QGraphicsView {
-    background-color: #11111b;
-    border: 1px solid #313244;
-    border-radius: 4px;
+QStackedWidget {
+    background-color: #1e1e2e;
 }
