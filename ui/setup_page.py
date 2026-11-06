@@ -1,6 +1,5 @@
 """
-Setup page – clean single-screen settings (no scroll).
-User fills this in, hits Generate, then moves to the View page.
+Setup page – three-column layout, clearer strategy controls.
 """
 from __future__ import annotations
 
@@ -11,19 +10,18 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFontDatabase
 from PyQt6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
-    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -35,242 +33,318 @@ class SetupPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._all_fonts: list[str] = []
         self._build()
 
     def _build(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(40, 28, 40, 28)
-        root.setSpacing(18)
+        root.setContentsMargins(28, 22, 28, 22)
+        root.setSpacing(14)
 
-        # ---- Header ----
         title = QLabel("LED Placement Studio")
         title.setObjectName("pageTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(title)
 
-        subtitle = QLabel("Design · Place · Preview · Export")
+        subtitle = QLabel("Design  ·  Place  ·  Preview  ·  Export")
         subtitle.setObjectName("pageSubtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(subtitle)
 
-        root.addSpacing(8)
+        cols = QHBoxLayout()
+        cols.setSpacing(14)
 
-        # ---- Two-column card layout ----
-        cards = QHBoxLayout()
-        cards.setSpacing(20)
+        # ========== COL 1 – Text & Font (wider) ==========
+        c1 = QFrame()
+        c1.setObjectName("card")
+        c1.setMinimumWidth(320)
+        l1 = QVBoxLayout(c1)
+        l1.setContentsMargins(16, 14, 16, 14)
+        l1.setSpacing(10)
 
-        # LEFT card: Text & Font + Size
-        left = QFrame()
-        left.setObjectName("card")
-        left_l = QVBoxLayout(left)
-        left_l.setSpacing(14)
-        left_l.setContentsMargins(20, 18, 20, 18)
-
-        left_l.addWidget(self._section_label("1  ·  Text & Font"))
+        l1.addWidget(self._section_label("Text & font"))
 
         self.text_edit = QPlainTextEdit()
-        self.text_edit.setPlaceholderText("Type your text here…\n(Persian, Arabic, English, …)")
-        self.text_edit.setFixedHeight(90)
+        self.text_edit.setPlaceholderText("Type your text…")
+        self.text_edit.setFixedHeight(88)
         self.text_edit.setPlainText("ظروف چوبی")
-        left_l.addWidget(self.text_edit)
+        l1.addWidget(self.text_edit)
 
-        row = QHBoxLayout()
         self.lang_combo = QComboBox()
         self.lang_combo.addItems(["RTL – Farsi / Arabic", "LTR – English / Latin"])
-        row.addWidget(QLabel("Direction"))
-        row.addWidget(self.lang_combo, 1)
-        left_l.addLayout(row)
+        l1.addWidget(QLabel("Direction"))
+        l1.addWidget(self.lang_combo)
 
-        row = QHBoxLayout()
+        l1.addWidget(QLabel("Font  (type to search)"))
         self.font_combo = QComboBox()
+        self.font_combo.setEditable(True)
+        self.font_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.font_combo.setMaxVisibleItems(16)
+        self.font_combo.setCompleter(None)  # we filter manually
         self._populate_fonts()
-        row.addWidget(QLabel("System font"))
-        row.addWidget(self.font_combo, 1)
-        left_l.addLayout(row)
+        # Filter as user types in the line edit
+        le = self.font_combo.lineEdit()
+        if le is not None:
+            le.textEdited.connect(self._on_font_typed)
+            le.editingFinished.connect(self._on_font_edit_finished)
+        l1.addWidget(self.font_combo)
 
         row = QHBoxLayout()
         self.font_path_edit = QLineEdit()
-        self.font_path_edit.setPlaceholderText("Optional: path to .ttf / .otf")
+        self.font_path_edit.setPlaceholderText("Or browse a .ttf / .otf file")
         btn_font = QPushButton("Browse…")
-        btn_font.setFixedWidth(90)
+        btn_font.setFixedWidth(88)
         btn_font.clicked.connect(self._browse_font)
         row.addWidget(self.font_path_edit, 1)
         row.addWidget(btn_font)
-        left_l.addLayout(row)
+        l1.addLayout(row)
 
-        left_l.addSpacing(6)
-        left_l.addWidget(self._section_label("2  ·  Physical size"))
+        l1.addSpacing(6)
+        l1.addWidget(self._section_label("Physical size"))
 
-        size_grid = QGridLayout()
-        size_grid.setHorizontalSpacing(12)
-        size_grid.setVerticalSpacing(8)
-
+        sg = QGridLayout()
         self.width_spin = QDoubleSpinBox()
         self.width_spin.setRange(0, 5000)
         self.width_spin.setValue(600)
-        self.width_spin.setSuffix("  mm")
+        self.width_spin.setSuffix(" mm")
         self.width_spin.setDecimals(1)
-
         self.height_spin = QDoubleSpinBox()
         self.height_spin.setRange(0, 5000)
         self.height_spin.setValue(0)
-        self.height_spin.setSuffix("  mm")
+        self.height_spin.setSuffix(" mm")
         self.height_spin.setDecimals(1)
-        self.height_spin.setToolTip("Leave 0 to size by width only")
-
-        size_grid.addWidget(QLabel("Width"), 0, 0)
-        size_grid.addWidget(self.width_spin, 0, 1)
-        size_grid.addWidget(QLabel("Height (optional)"), 1, 0)
-        size_grid.addWidget(self.height_spin, 1, 1)
-        left_l.addLayout(size_grid)
-
-        left_l.addStretch()
-        cards.addWidget(left, 1)
-
-        # RIGHT card: LED strategy + extras
-        right = QFrame()
-        right.setObjectName("card")
-        right_l = QVBoxLayout(right)
-        right_l.setSpacing(14)
-        right_l.setContentsMargins(20, 18, 20, 18)
-
-        right_l.addWidget(self._section_label("3  ·  LED strategy"))
-
-        # Mode
-        mode_row = QHBoxLayout()
-        self.mode_edges = QRadioButton("Edges (outline)")
-        self.mode_center = QRadioButton("Centerline")
-        self.mode_edges.setChecked(True)
-        self._mode_group = QButtonGroup(self)
-        self._mode_group.addButton(self.mode_edges)
-        self._mode_group.addButton(self.mode_center)
-        mode_row.addWidget(self.mode_edges)
-        mode_row.addWidget(self.mode_center)
-        mode_row.addStretch()
-        right_l.addLayout(mode_row)
-
-        # Pitch strategy – clearer UX
-        hint = QLabel(
-            "Choose how LEDs are spaced:\n"
-            "• Target count → app finds the best pitch automatically\n"
-            "• Fixed pitch → exact millimetre spacing"
+        self.height_spin.setToolTip(
+            "0 = size by width only. Both set → fit inside the box."
         )
-        hint.setObjectName("hintLabel")
-        hint.setWordWrap(True)
-        right_l.addWidget(hint)
+        sg.addWidget(QLabel("Width"), 0, 0)
+        sg.addWidget(self.width_spin, 0, 1)
+        sg.addWidget(QLabel("Height"), 1, 0)
+        sg.addWidget(self.height_spin, 1, 1)
+        l1.addLayout(sg)
 
-        self.strategy_target = QRadioButton("Target LED count")
-        self.strategy_pitch = QRadioButton("Fixed pitch")
-        self.strategy_target.setChecked(True)
-        self._strat_group = QButtonGroup(self)
-        self._strat_group.addButton(self.strategy_target)
-        self._strat_group.addButton(self.strategy_pitch)
-        right_l.addWidget(self.strategy_target)
-        right_l.addWidget(self.strategy_pitch)
+        l1.addStretch()
+        cols.addWidget(c1, 3)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(8)
+        # ========== COL 2 – Strategy ==========
+        c2 = QFrame()
+        c2.setObjectName("card")
+        c2.setMinimumWidth(260)
+        l2 = QVBoxLayout(c2)
+        l2.setContentsMargins(16, 14, 16, 14)
+        l2.setSpacing(10)
+
+        l2.addWidget(self._section_label("Method"))
+        self.method_domino = QRadioButton("Domino")
+        self.method_classic = QRadioButton("Classic")
+        self.method_domino.setChecked(True)
+        self.method_domino.setToolTip(
+            "Centre-to-centre chain: place → step D → place.\n"
+            "Gap value = distance between centres."
+        )
+        self.method_classic.setToolTip(
+            "Original contour walk with corner preference.\n"
+            "Gap value = body-to-body clearance."
+        )
+        self._method_group = QButtonGroup(self)
+        self._method_group.addButton(self.method_domino)
+        self._method_group.addButton(self.method_classic)
+        l2.addWidget(self.method_domino)
+        l2.addWidget(self.method_classic)
+
+        l2.addSpacing(4)
+        l2.addWidget(self._section_label("Path"))
+        self.path_edge = QRadioButton("Edge (outline)")
+        self.path_center = QRadioButton("Centerline")
+        self.path_both = QRadioButton("Both (outline + fill)")
+        self.path_edge.setChecked(True)
+        self.path_edge.setToolTip("Follow the outer outline of the letters")
+        self.path_center.setToolTip(
+            "Follow the middle of strokes — best for filled / small fonts"
+        )
+        self.path_both.setToolTip("Outline first, then fill the interior")
+        self._path_group = QButtonGroup(self)
+        for b in (self.path_edge, self.path_center, self.path_both):
+            self._path_group.addButton(b)
+            l2.addWidget(b)
+
+        l2.addSpacing(4)
+        l2.addWidget(self._section_label("Spacing control"))
+        self.space_gap = QRadioButton("By gap")
+        self.space_count = QRadioButton("By LED count")
+        self.space_gap.setChecked(True)
+        self._space_group = QButtonGroup(self)
+        self._space_group.addButton(self.space_gap)
+        self._space_group.addButton(self.space_count)
+        l2.addWidget(self.space_gap)
+        l2.addWidget(self.space_count)
+
+        self.gap_spin = QDoubleSpinBox()
+        self.gap_spin.setRange(0.3, 40.0)
+        self.gap_spin.setValue(1.0)
+        self.gap_spin.setSingleStep(0.5)
+        self.gap_spin.setSuffix(" mm")
+        self.gap_spin.setToolTip(
+            "Domino: centre-to-centre D.\nClassic: body-to-body clearance."
+        )
 
         self.max_leds_spin = QSpinBox()
-        self.max_leds_spin.setRange(10, 5000)
+        self.max_leds_spin.setRange(10, 8000)
         self.max_leds_spin.setValue(300)
-        self.max_leds_spin.setSuffix("  LEDs")
+        self.max_leds_spin.setSuffix(" LEDs")
+        self.max_leds_spin.setEnabled(False)
 
-        self.pitch_spin = QDoubleSpinBox()
-        self.pitch_spin.setRange(2.5, 40.0)
-        self.pitch_spin.setValue(6.0)
-        self.pitch_spin.setSingleStep(0.5)
-        self.pitch_spin.setSuffix("  mm")
-        self.pitch_spin.setEnabled(False)
+        g = QGridLayout()
+        g.addWidget(QLabel("Gap"), 0, 0)
+        g.addWidget(self.gap_spin, 0, 1)
+        g.addWidget(QLabel("Target count"), 1, 0)
+        g.addWidget(self.max_leds_spin, 1, 1)
+        l2.addLayout(g)
 
-        grid.addWidget(QLabel("Max LEDs"), 0, 0)
-        grid.addWidget(self.max_leds_spin, 0, 1)
-        grid.addWidget(QLabel("Pitch"), 1, 0)
-        grid.addWidget(self.pitch_spin, 1, 1)
-        right_l.addLayout(grid)
+        self.space_gap.toggled.connect(self._on_space_mode)
+        self.method_domino.toggled.connect(self._update_gap_label)
+        self._gap_label_hint = QLabel("")
+        self._gap_label_hint.setObjectName("hintLabel")
+        self._gap_label_hint.setWordWrap(True)
+        l2.addWidget(self._gap_label_hint)
+        self._update_gap_label()
 
-        self.strategy_target.toggled.connect(self._on_strategy_changed)
+        l2.addStretch()
+        cols.addWidget(c2, 2)
 
-        # Fine details (compact)
-        right_l.addSpacing(4)
-        right_l.addWidget(self._section_label("4  ·  Hardware"))
+        # ========== COL 3 – Hardware & output (narrower) ==========
+        c3 = QFrame()
+        c3.setObjectName("card")
+        c3.setMinimumWidth(220)
+        l3 = QVBoxLayout(c3)
+        l3.setContentsMargins(16, 14, 16, 14)
+        l3.setSpacing(10)
 
-        hw = QGridLayout()
-        hw.setHorizontalSpacing(12)
+        l3.addWidget(self._section_label("Hardware"))
         self.led_dia_spin = QDoubleSpinBox()
         self.led_dia_spin.setRange(1.0, 20.0)
         self.led_dia_spin.setValue(5.0)
-        self.led_dia_spin.setSuffix("  mm")
+        self.led_dia_spin.setSuffix(" mm")
         self.pin_spacing_spin = QDoubleSpinBox()
         self.pin_spacing_spin.setRange(0.5, 10.0)
         self.pin_spacing_spin.setValue(2.54)
-        self.pin_spacing_spin.setSuffix("  mm")
-        hw.addWidget(QLabel("LED Ø"), 0, 0)
-        hw.addWidget(self.led_dia_spin, 0, 1)
-        hw.addWidget(QLabel("Pin spacing"), 1, 0)
-        hw.addWidget(self.pin_spacing_spin, 1, 1)
-        right_l.addLayout(hw)
+        self.pin_spacing_spin.setSuffix(" mm")
+        h = QGridLayout()
+        h.addWidget(QLabel("LED Ø"), 0, 0)
+        h.addWidget(self.led_dia_spin, 0, 1)
+        h.addWidget(QLabel("Pin spacing"), 1, 0)
+        h.addWidget(self.pin_spacing_spin, 1, 1)
+        l3.addLayout(h)
 
-        right_l.addSpacing(4)
-        right_l.addWidget(self._section_label("5  ·  Output folder"))
-
+        l3.addSpacing(6)
+        l3.addWidget(self._section_label("Output folder"))
         out_row = QHBoxLayout()
         self.out_path_edit = QLineEdit()
         self.out_path_edit.setText(str(Path.home() / "LED_Placement_Output"))
         btn_out = QPushButton("…")
-        btn_out.setFixedWidth(40)
+        btn_out.setFixedWidth(36)
         btn_out.clicked.connect(self._browse_output)
         out_row.addWidget(self.out_path_edit, 1)
         out_row.addWidget(btn_out)
-        right_l.addLayout(out_row)
+        l3.addLayout(out_row)
 
-        right_l.addStretch()
-        cards.addWidget(right, 1)
+        tip = QLabel(
+            "After Generate you can move, add or delete LEDs on the View page."
+        )
+        tip.setObjectName("hintLabel")
+        tip.setWordWrap(True)
+        l3.addWidget(tip)
 
-        root.addLayout(cards, 1)
+        l3.addStretch()
+        cols.addWidget(c3, 2)
 
-        # ---- Big Generate CTA ----
+        root.addLayout(cols, 1)
+
         self.btn_generate = QPushButton("Generate placement  →")
         self.btn_generate.setObjectName("generateBtn")
-        self.btn_generate.setMinimumHeight(52)
+        self.btn_generate.setMinimumHeight(48)
         self.btn_generate.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_generate.clicked.connect(self.generate_clicked.emit)
         root.addWidget(self.btn_generate)
-
-        tip = QLabel("Tip: after generating you can move, add or delete LEDs on the View page.")
-        tip.setObjectName("pageSubtitle")
-        tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        root.addWidget(tip)
 
     def _section_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
         lbl.setObjectName("sectionLabel")
         return lbl
 
-    def _on_strategy_changed(self, target_on: bool):
-        self.max_leds_spin.setEnabled(target_on)
-        self.pitch_spin.setEnabled(not target_on)
+    def _on_space_mode(self, gap_on: bool):
+        self.gap_spin.setEnabled(gap_on)
+        self.max_leds_spin.setEnabled(not gap_on)
 
+    def _update_gap_label(self):
+        if self.method_domino.isChecked():
+            self._gap_label_hint.setText(
+                "Domino gap = centre-to-centre distance D."
+            )
+        else:
+            self._gap_label_hint.setText(
+                "Classic gap = body-to-body clearance "
+                "(centres ≈ LED Ø + gap)."
+            )
+
+    # ---- fonts ----
     def _populate_fonts(self):
-        families = QFontDatabase.families()
+        families = list(QFontDatabase.families())
         preferred = [
             "Arial", "Segoe UI", "Tahoma", "Times New Roman",
             "IranNastaliq", "Vazir", "Vazirmatn", "Noto Naskh Arabic",
             "Noto Sans Arabic", "DejaVu Sans",
         ]
-        seen = set()
+        ordered, seen = [], set()
         for f in preferred:
             if f in families and f not in seen:
-                self.font_combo.addItem(f)
+                ordered.append(f)
                 seen.add(f)
         for f in sorted(families):
             if f not in seen:
-                self.font_combo.addItem(f)
+                ordered.append(f)
+        self._all_fonts = ordered
+        self.font_combo.clear()
+        self.font_combo.addItems(ordered)
+
+    def _on_font_typed(self, text: str):
+        q = text.strip().lower()
+        self.font_combo.blockSignals(True)
+        self.font_combo.clear()
+        if not q:
+            self.font_combo.addItems(self._all_fonts)
+        else:
+            matches = [f for f in self._all_fonts if q in f.lower()]
+            self.font_combo.addItems(matches if matches else self._all_fonts)
+        # Keep typed text in the line edit
+        le = self.font_combo.lineEdit()
+        if le is not None:
+            le.setText(text)
+            le.setCursorPosition(len(text))
+        self.font_combo.blockSignals(False)
+        if self.font_combo.count() > 0:
+            self.font_combo.showPopup()
+
+    def _on_font_edit_finished(self):
+        le = self.font_combo.lineEdit()
+        if le is None:
+            return
+        typed = le.text().strip()
+        # If exact match exists, select it; else keep first match / typed
+        idx = self.font_combo.findText(typed, Qt.MatchFlag.MatchFixedString)
+        if idx >= 0:
+            self.font_combo.setCurrentIndex(idx)
+        elif self.font_combo.count() > 0:
+            # try case-insensitive
+            for i in range(self.font_combo.count()):
+                if self.font_combo.itemText(i).lower() == typed.lower():
+                    self.font_combo.setCurrentIndex(i)
+                    return
 
     def _browse_font(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Font File", str(Path.home()),
+            self,
+            "Select Font File",
+            str(Path.home()),
             "Font Files (*.ttf *.otf *.ttc);;All Files (*)",
         )
         if path:
@@ -295,7 +369,7 @@ class SetupPage(QWidget):
         return custom if custom and Path(custom).is_file() else None
 
     def get_font_family(self) -> str:
-        return self.font_combo.currentText()
+        return self.font_combo.currentText().strip()
 
     def get_desired_width(self) -> float:
         return self.width_spin.value()
@@ -304,15 +378,22 @@ class SetupPage(QWidget):
         return self.height_spin.value()
 
     def get_placement_mode(self) -> str:
-        return "centerline" if self.mode_center.isChecked() else "edges"
+        """Map Method × Path → engine mode string."""
+        domino = self.method_domino.isChecked()
+        if self.path_both.isChecked():
+            return "fill"  # outline+interior (uses domino outline)
+        if self.path_center.isChecked():
+            return "domino_centerline" if domino else "centerline"
+        # edge
+        return "domino" if domino else "edges"
 
     def get_max_leds(self) -> Optional[int]:
-        if self.strategy_target.isChecked():
+        if self.space_count.isChecked():
             return self.max_leds_spin.value()
         return None
 
-    def get_pitch(self) -> float:
-        return self.pitch_spin.value()
+    def get_gap(self) -> float:
+        return self.gap_spin.value()
 
     def get_led_dia(self) -> float:
         return self.led_dia_spin.value()
@@ -325,4 +406,6 @@ class SetupPage(QWidget):
 
     def set_busy(self, busy: bool):
         self.btn_generate.setEnabled(not busy)
-        self.btn_generate.setText("Working…" if busy else "Generate placement  →")
+        self.btn_generate.setText(
+            "Working…" if busy else "Generate placement  →"
+        )

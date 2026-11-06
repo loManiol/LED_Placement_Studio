@@ -35,17 +35,25 @@ from core.engine import LEDPad, TileRect
 # ---------------------------------------------------------------------------
 
 class LEDNode(QGraphicsEllipseItem):
-    """Draggable / selectable LED pad visual."""
+    """Draggable / selectable LED pad visual — drawn at true physical diameter."""
 
-    RADIUS = 6.0  # scene units (≈ mm * scale)
     COLOR_NORMAL = QColor("#89b4fa")
     COLOR_HOVER = QColor("#b4befe")
     COLOR_SELECTED = QColor("#f9e2af")
-    COLOR_ON = QColor("#ff3333")       # bright red when simulating
+    COLOR_ON = QColor("#ff3333")
     COLOR_ON_GLOW = QColor("#ff6666")
 
-    def __init__(self, pad: LEDPad, scale: float = 1.0, parent=None):
-        r = self.RADIUS
+    def __init__(
+        self,
+        pad: LEDPad,
+        scale: float = 1.0,
+        led_dia_mm: float = 5.0,
+        parent=None,
+    ):
+        # scale = scene units per mm → radius matches real LED body size
+        self.led_dia_mm = max(0.5, float(led_dia_mm))
+        self.radius = (self.led_dia_mm / 2.0) * scale
+        r = self.radius
         super().__init__(-r, -r, 2 * r, 2 * r, parent)
         self.pad = pad
         self.scale_factor = scale  # mm → scene units
@@ -53,7 +61,7 @@ class LEDNode(QGraphicsEllipseItem):
 
         self.setPos(pad.x_mm * scale, pad.y_mm * scale)
         self.setBrush(QBrush(self.COLOR_NORMAL))
-        self.setPen(QPen(QColor("#1e1e2e"), 1.5))
+        self.setPen(QPen(QColor("#1e1e2e"), 1.0))
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
@@ -65,18 +73,24 @@ class LEDNode(QGraphicsEllipseItem):
         self._simulating = on
         if on:
             self.setBrush(QBrush(self.COLOR_ON))
-            self.setPen(QPen(QColor("#ffaaaa"), 2))
-            # slightly larger for “glow”
-            r = self.RADIUS * 1.25
+            self.setPen(QPen(QColor("#ffaaaa"), 1.5))
+            r = self.radius * 1.15
             self.setRect(-r, -r, 2 * r, 2 * r)
         else:
             self.setBrush(QBrush(self.COLOR_NORMAL))
-            self.setPen(QPen(QColor("#1e1e2e"), 1.5))
-            r = self.RADIUS
+            self.setPen(QPen(QColor("#1e1e2e"), 1.0))
+            r = self.radius
             self.setRect(-r, -r, 2 * r, 2 * r)
         self.update()
 
     def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
+            scene = self.scene()
+            if scene is not None:
+                for v in scene.views():
+                    if hasattr(v, "_note_led_moving"):
+                        v._note_led_moving()
+                        break
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             pos = self.pos()
             self.pad.x_mm = pos.x() / self.scale_factor
@@ -98,10 +112,9 @@ class LEDNode(QGraphicsEllipseItem):
 
     def paint(self, painter, option, widget=None):
         if self._simulating:
-            # soft outer glow
-            painter.setBrush(QBrush(QColor(255, 50, 50, 80)))
+            painter.setBrush(QBrush(QColor(255, 50, 50, 70)))
             painter.setPen(Qt.PenStyle.NoPen)
-            r = self.RADIUS * 2.2
+            r = self.radius * 1.6
             painter.drawEllipse(QPointF(0, 0), r, r)
             self.setBrush(QBrush(self.COLOR_ON))
         elif self.isSelected():
@@ -174,10 +187,14 @@ class LEDCanvas(QGraphicsView):
         self._tiles: List[TileItem] = []
         self._result = None  # PlacementResult reference
         self._simulating = False
+        self._led_dia_mm = 5.0
 
-        # Undo stack (simple list of pad snapshots)
+        # Undo stack
         self._undo_stack: List[List[LEDPad]] = []
         self._redo_stack: List[List[LEDPad]] = []
+        self._panning = False
+        self._pan_start = None
+        self._drag_undo_pushed = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -198,6 +215,7 @@ class LEDCanvas(QGraphicsView):
         """Load a PlacementResult and plot everything."""
         self.clear()
         self._result = result
+        self._led_dia_mm = float(getattr(result, "led_dia_mm", 5.0) or 5.0)
         pads = pads if pads is not None else list(result.pads)
 
         # Background silhouette
@@ -232,14 +250,16 @@ class LEDCanvas(QGraphicsView):
         self._border_item.setZValue(1)
         self.scene.addItem(self._border_item)
 
-        # Slightly larger scene so border is fully visible
+        # Large scene so tiles can extend past the design border
+        # (edge LEDs stay inside the printed paper, not on the cut line)
+        tile_pad = max(scene_w, scene_h) * 0.35 + 80
         self.scene.setSceneRect(
-            -margin - 4, -margin - 4, scene_w + 2 * margin + 8, scene_h + 2 * margin + 8
+            -tile_pad, -tile_pad, scene_w + 2 * tile_pad, scene_h + 2 * tile_pad
         )
 
-        # LED nodes
+        # LED nodes — drawn at true physical diameter
         for pad in pads:
-            node = LEDNode(pad, scale=self._scale)
+            node = LEDNode(pad, scale=self._scale, led_dia_mm=self._led_dia_mm)
             self.scene.addItem(node)
             self._nodes.append(node)
 
@@ -265,14 +285,21 @@ class LEDCanvas(QGraphicsView):
             self._tiles.append(item)
 
     def add_led_at(self, x_mm: float, y_mm: float):
+        self._push_undo()  # snapshot before change
         pad = LEDPad(x_mm, y_mm)
-        node = LEDNode(pad, scale=self._scale)
+        node = LEDNode(pad, scale=self._scale, led_dia_mm=self._led_dia_mm)
         if self._simulating:
             node.set_simulating(True)
         self.scene.addItem(node)
         self._nodes.append(node)
         self.led_count_changed.emit(len(self._nodes))
-        self._push_undo()
+
+    def fit_design(self):
+        """Fit the whole design (with border) into the viewport."""
+        if self.scene.sceneRect().isEmpty():
+            return
+        self.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self.status_message.emit("View fitted")
 
     def set_simulate(self, on: bool):
         """Hide text background and light LEDs red, or restore edit view."""
@@ -308,35 +335,45 @@ class LEDCanvas(QGraphicsView):
     # ------------------------------------------------------------------
     # Undo / Redo
     # ------------------------------------------------------------------
+    def _snapshot_pads(self) -> List[LEDPad]:
+        return [LEDPad(p.x_mm, p.y_mm, p.tx, p.ty) for p in self.get_current_pads()]
+
     def _push_undo(self):
-        snapshot = [LEDPad(p.x_mm, p.y_mm, p.tx, p.ty) for p in self.get_current_pads()]
-        self._undo_stack.append(snapshot)
+        self._undo_stack.append(self._snapshot_pads())
         self._redo_stack.clear()
-        if len(self._undo_stack) > 40:
+        if len(self._undo_stack) > 50:
             self._undo_stack.pop(0)
+
+    def _note_led_moving(self):
+        """One undo entry per drag gesture."""
+        if not self._drag_undo_pushed:
+            self._push_undo()
+            self._drag_undo_pushed = True
 
     def undo(self):
         if not self._undo_stack:
+            self.status_message.emit("Nothing to undo")
             return
-        current = [LEDPad(p.x_mm, p.y_mm, p.tx, p.ty) for p in self.get_current_pads()]
-        self._redo_stack.append(current)
+        self._redo_stack.append(self._snapshot_pads())
         prev = self._undo_stack.pop()
         self._restore_pads(prev)
+        self.status_message.emit(f"Undo — {len(prev)} LEDs")
 
     def redo(self):
         if not self._redo_stack:
+            self.status_message.emit("Nothing to redo")
             return
-        current = [LEDPad(p.x_mm, p.y_mm, p.tx, p.ty) for p in self.get_current_pads()]
-        self._undo_stack.append(current)
+        self._undo_stack.append(self._snapshot_pads())
         nxt = self._redo_stack.pop()
         self._restore_pads(nxt)
+        self.status_message.emit(f"Redo — {len(nxt)} LEDs")
 
     def _restore_pads(self, pads: List[LEDPad]):
         for n in self._nodes:
             self.scene.removeItem(n)
         self._nodes.clear()
         for pad in pads:
-            node = LEDNode(pad, scale=self._scale)
+            node = LEDNode(pad, scale=self._scale, led_dia_mm=self._led_dia_mm)
             self.scene.addItem(node)
             self._nodes.append(node)
         self.led_count_changed.emit(len(self._nodes))
@@ -373,6 +410,41 @@ class LEDCanvas(QGraphicsView):
         elif chosen == act_redo:
             self.redo()
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._panning = True
+            self._pan_start = event.position().toPoint()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_undo_pushed = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._panning and self._pan_start is not None:
+            delta = event.position().toPoint() - self._pan_start
+            self._pan_start = event.position().toPoint()
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - delta.x()
+            )
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() - delta.y()
+            )
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton and self._panning:
+            self._panning = False
+            self._pan_start = None
+            self.unsetCursor()
+            event.accept()
+            return
+        self._drag_undo_pushed = False
+        super().mouseReleaseEvent(event)
+
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             scene_pos = self.mapToScene(event.pos())
@@ -383,13 +455,24 @@ class LEDCanvas(QGraphicsView):
             super().mouseDoubleClickEvent(event)
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Delete:
+        key = event.key()
+        mods = event.modifiers()
+        ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+
+        if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.delete_selected()
             self.delete_selected_tiles()
-        elif event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            if event.key() == Qt.Key.Key_Z:
-                self.undo()
-            elif event.key() == Qt.Key.Key_Y:
-                self.redo()
-        else:
-            super().keyPressEvent(event)
+            event.accept()
+            return
+
+        if ctrl and key == Qt.Key.Key_Z and not shift:
+            self.undo()
+            event.accept()
+            return
+        if ctrl and (key == Qt.Key.Key_Y or (key == Qt.Key.Key_Z and shift)):
+            self.redo()
+            event.accept()
+            return
+
+        super().keyPressEvent(event)

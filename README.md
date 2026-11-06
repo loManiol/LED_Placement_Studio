@@ -1,73 +1,82 @@
 # LED Placement Studio
 
-Interactive desktop application for placing LED pads along text outlines (supports Persian/Arabic RTL and Latin LTR). Built with PyQt6 + OpenCV.
+**Version 1.0.0** — Interactive desktop app for placing LED pads along text outlines.
+
+Supports Persian/Arabic (RTL) and Latin scripts, adaptive pitch from a max-LED target, manual editing, simulation, and tiled print export.
 
 ## Features
 
-- **Native system font rendering** (including complex scripts via Qt)
-- **Max LED count** targeting via adaptive pitch binary search
-- **Interactive canvas**: move, add, delete LED nodes
-- **Auto & Manual tiling** (A2–A5, B2–B5, custom)
-- **Live metrics**: current LED count, estimated pitch
-- **Export**: Master JPG, Tile JPGs, CSV coordinates, optional SVG/PDF
-- **Zoom / Pan**, Undo/Redo, modern dark UI
+- **Setup → View** two-page flow (no cluttered sidebars)
+- System fonts + custom `.ttf` / `.otf`
+- **Target LED count** (auto pitch) or **fixed pitch**
+- Live LED counter while you edit
+- Drag / add / delete pads · undo/redo
+- **Simulate** — hide text, light LEDs red
+- Auto & manual tiling (A2–A5, B-series)
+- Export: master JPG, CSV coordinates, tile JPGs
+- Remembers your last settings & window size
 
-## Project Structure
+## Quick start
 
-```
-LED_Placement_Studio/
-├── main.py                 # Entry point
-├── requirements.txt
-├── README.md
-├── core/
-│   ├── __init__.py
-│   └── engine.py           # Core processing (render, place, tile)
-├── ui/
-│   ├── __init__.py
-│   ├── main_window.py      # Main window + layout
-│   ├── sidebar.py          # Left control panel
-│   ├── canvas.py           # QGraphicsView interactive editor
-│   └── styles.py           # QSS theme
-├── styles/
-│   └── dark.qss            # Stylesheet
-└── assets/                 # Icons, etc. (optional)
+### Windows
+1. Install [Python 3.10+](https://www.python.org/downloads/) (check “Add to PATH”)
+2. Unzip this folder
+3. Double-click **`run.cmd`**
+
+### macOS / Linux
+```bash
+chmod +x run.sh
+./run.sh
 ```
 
-## Installation
-
+### Manual
 ```bash
 python -m venv venv
-# Windows
-venv\Scripts\activate
-# macOS / Linux
-source venv/bin/activate
-
+# Windows: venv\Scripts\activate
+source venv/bin/activate   # macOS/Linux
 pip install -r requirements.txt
-```
-
-## Run
-
-```bash
 python main.py
 ```
 
-## Packaging (optional)
+## Build a standalone app
 
 ```bash
-pip install pyinstaller
-pyinstaller --onefile --windowed --name "LED Placement Studio" main.py
+# Windows
+build_windows.cmd
+
+# macOS / Linux
+./build_macos_linux.sh
 ```
 
-## Development Roadmap (Status)
+Output lands in `dist/`.
 
-| Sprint | Description                        | Status   |
-|--------|------------------------------------|----------|
-| 1      | UI Shell & Input Form              | Done     |
-| 2      | CoreEngine integration             | Done     |
-| 3      | Interactive LED Canvas             | Done     |
-| 4      | Tiling Manager (auto + manual)     | Done     |
-| 5      | Export Pipeline                    | Done     |
+## Keyboard shortcuts
+
+| Key | Action |
+|-----|--------|
+| Ctrl+Enter | Generate |
+| Ctrl+E | Export |
+| Ctrl+1 / Ctrl+2 | Setup / View |
+| Ctrl+0 | Fit design |
+| Space | Toggle simulate |
+| Ctrl+Z / Ctrl+Y | Undo / Redo |
+| Delete | Remove selection |
+| Double-click | Add LED |
+| Scroll wheel | Zoom |
+
+## Project layout
+
+```
+LED_Placement_Studio/
+├── main.py
+├── run.cmd / run.sh
+├── requirements.txt
+├── core/          # engine + settings + version
+├── ui/            # setup page, view page, canvas
+├── styles/        # dark theme
+└── assets/        # app icon
+```
 
 ## License
 
-MIT – feel free to modify for your workshop / production needs.
+MIT — use it in your workshop or product freely.

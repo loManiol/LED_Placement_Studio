@@ -31,6 +31,7 @@ class ViewPage(QWidget):
     auto_tile_clicked = pyqtSignal()
     add_tile_clicked = pyqtSignal()
     clear_tiles_clicked = pyqtSignal()
+    fit_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -59,10 +60,10 @@ class ViewPage(QWidget):
         self.lbl_leds_cap = QLabel("LEDs")
         self.lbl_leds_cap.setObjectName("metricCap")
 
-        self.lbl_pitch = QLabel("—")
-        self.lbl_pitch.setObjectName("metricBig")
-        self.lbl_pitch_cap = QLabel("Pitch mm")
-        self.lbl_pitch_cap.setObjectName("metricCap")
+        self.lbl_gap = QLabel("—")
+        self.lbl_gap.setObjectName("metricBig")
+        self.lbl_gap_cap = QLabel("Gap mm")
+        self.lbl_gap_cap.setObjectName("metricCap")
 
         self.lbl_size = QLabel("—")
         self.lbl_size.setObjectName("metricBig")
@@ -71,7 +72,7 @@ class ViewPage(QWidget):
 
         for big, cap in (
             (self.lbl_leds, self.lbl_leds_cap),
-            (self.lbl_pitch, self.lbl_pitch_cap),
+            (self.lbl_gap, self.lbl_gap_cap),
             (self.lbl_size, self.lbl_size_cap),
         ):
             box = QVBoxLayout()
@@ -100,6 +101,12 @@ class ViewPage(QWidget):
 
         top.addWidget(self.btn_simulate)
         top.addWidget(self.btn_stop)
+
+        self.btn_fit = QPushButton("Fit view")
+        self.btn_fit.setObjectName("ghostBtn")
+        self.btn_fit.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_fit.clicked.connect(self.fit_clicked.emit)
+        top.addWidget(self.btn_fit)
 
         self.btn_export = QPushButton("Export all")
         self.btn_export.setObjectName("exportBtn")
@@ -190,12 +197,25 @@ class ViewPage(QWidget):
         return lbl
 
     # ---- public helpers used by MainWindow ----
-    def set_metrics(self, leds: int, pitch: float, w_mm: float, h_mm: float, target: int | None = None):
+    def set_metrics(
+        self,
+        leds: int,
+        gap: float,
+        spacing: float,
+        w_mm: float,
+        h_mm: float,
+        target: int | None = None,
+    ):
         if target:
             self.lbl_leds.setText(f"{leds} / {target}")
         else:
             self.lbl_leds.setText(str(leds))
-        self.lbl_pitch.setText(f"{pitch:.2f}")
+        # Show body gap; tooltip-style second line via status is enough for centres
+        self.lbl_gap.setText(f"{gap:.2f}")
+        self.lbl_gap.setToolTip(
+            f"Edge-to-edge gap between LED bodies.\n"
+            f"Centre-to-centre spacing: {spacing:.2f} mm"
+        )
         self.lbl_size.setText(f"{w_mm:.0f}×{h_mm:.0f}")
 
     def set_led_count(self, n: int, target: int | None = None):

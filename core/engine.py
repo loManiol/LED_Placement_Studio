@@ -46,9 +46,16 @@ class PlacementResult:
     mask: np.ndarray                 # binary mask at PX_PER_MM resolution
     final_w_mm: float
     final_h_mm: float
-    pitch_mm: float
+    gap_mm: float                    # edge-to-edge gap between LED bodies
+    spacing_mm: float                # center-to-center = led_dia + gap
     scale: float
+    led_dia_mm: float = 5.0          # physical LED body diameter
     underlay: Optional[np.ndarray] = None  # high-res grayscale for preview
+
+    # backward-friendly alias
+    @property
+    def pitch_mm(self) -> float:
+        return self.spacing_mm
 
 
 # ---------------------------------------------------------------------------
@@ -191,13 +198,23 @@ class CoreEngine:
     # ------------------------------------------------------------------
     # 3. LED placement along contours
     # ------------------------------------------------------------------
+    def center_spacing_mm(self, gap_mm: float) -> float:
+        """Center-to-center distance for a given edge-to-edge body gap."""
+        return float(self.led_dia_mm) + float(gap_mm)
+
     def place_leds(
         self,
         routing_mask: np.ndarray,
         check_mask: np.ndarray,
-        pitch_mm: float,
+        gap_mm: float,
     ) -> List[LEDPad]:
-        spacing_px = pitch_mm * self.px_per_mm
+        """
+        Classic contour placement (corners preferred) with a hard minimum
+        centre-to-centre distance of (led_dia + gap). Overlaps are rejected
+        in a final pass — spacing is never allowed to collapse.
+        """
+        spacing_mm = max(self.center_spacing_mm(gap_mm), self.led_dia_mm * 0.5)
+        spacing_px = spacing_mm * self.px_per_mm
         pads_native: List[Tuple[float, float, float, float]] = []
 
         contours, _ = cv2.findContours(
@@ -215,7 +232,7 @@ class CoreEngine:
             c_pts = c.reshape(-1, 2)
             closed = np.vstack([c_pts, c_pts[:1]])
 
-            current_dist = spacing_px  # force placement at start
+            current_dist = spacing_px  # force a first candidate at the start
             for i in range(len(closed) - 1):
                 p1, p2 = closed[i], closed[i + 1]
                 dist = float(np.hypot(p2[0] - p1[0], p2[1] - p1[1]))
@@ -223,16 +240,16 @@ class CoreEngine:
                 is_corner = tuple(p1) in corner_pts
 
                 if is_corner or current_dist >= spacing_px:
-                    step = min(5, len(closed) // 8)
+                    step = min(5, max(1, len(closed) // 8))
                     p_prev = closed[max(0, i - step)]
                     p_next = closed[min(len(closed) - 1, i + step)]
-                    dx = p_next[0] - p_prev[0]
-                    dy = p_next[1] - p_prev[1]
+                    dx = float(p_next[0] - p_prev[0])
+                    dy = float(p_next[1] - p_prev[1])
                     L = float(np.hypot(dx, dy))
                     tx, ty = (1.0, 0.0) if L < 1e-6 else (dx / L, dy / L)
 
-                    cx_mm = p1[0] / self.px_per_mm
-                    cy_mm = p1[1] / self.px_per_mm
+                    cx_mm = float(p1[0]) / self.px_per_mm
+                    cy_mm = float(p1[1]) / self.px_per_mm
 
                     p1x = cx_mm + tx * (self.pin_spacing_mm / 2)
                     p1y = cy_mm + ty * (self.pin_spacing_mm / 2)
@@ -247,15 +264,255 @@ class CoreEngine:
 
                 current_dist += dist
 
-        # Strict deduplication
+        # Hard overlap guard — full body spacing, no 0.7 fudge
         final: List[LEDPad] = []
-        min_d2 = (pitch_mm * 0.7) ** 2
+        min_d2 = spacing_mm ** 2
         for r in pads_native:
             if all(
                 (r[0] - q.x_mm) ** 2 + (r[1] - q.y_mm) ** 2 >= min_d2 for q in final
             ):
                 final.append(LEDPad(*r))
         return final
+
+    def place_interior_fill(
+
+        self,
+        fill_mask: np.ndarray,
+        gap_mm: float,
+        existing: Optional[List[LEDPad]] = None,
+    ) -> List[LEDPad]:
+        """
+        Fill the *inside* of the glyph with a hexagonal-ish grid of LEDs,
+        respecting centre spacing = led_dia + gap, and staying clear of
+        any already-placed edge pads.
+        """
+        spacing_mm = max(self.center_spacing_mm(gap_mm), self.led_dia_mm * 0.5)
+        spacing_px = spacing_mm * self.px_per_mm
+
+        # Shrink mask so fill stays away from the outline by ~half spacing
+        erode_r = max(1, int(round(spacing_px * 0.45)))
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (erode_r * 2 + 1, erode_r * 2 + 1)
+        )
+        inner = cv2.erode(fill_mask, kernel)
+        if cv2.countNonZero(inner) == 0:
+            return []
+
+        h, w = inner.shape
+        existing = existing or []
+        min_d2 = spacing_mm ** 2
+        pads: List[LEDPad] = []
+
+        # Offset every other row for denser hexagonal packing still ≥ spacing
+        row_step = spacing_px
+        col_step = spacing_px
+        y = float(spacing_px * 0.5)
+        row = 0
+        while y < h:
+            x_off = (spacing_px * 0.5) if (row % 2) else 0.0
+            x = float(spacing_px * 0.5 + x_off)
+            while x < w:
+                ix, iy = int(round(x)), int(round(y))
+                if 0 <= iy < h and 0 <= ix < w and inner[iy, ix] > 0:
+                    cx_mm = x / self.px_per_mm
+                    cy_mm = y / self.px_per_mm
+                    ok = True
+                    for q in existing:
+                        if (cx_mm - q.x_mm) ** 2 + (cy_mm - q.y_mm) ** 2 < min_d2:
+                            ok = False
+                            break
+                    if ok:
+                        for q in pads:
+                            if (cx_mm - q.x_mm) ** 2 + (cy_mm - q.y_mm) ** 2 < min_d2:
+                                ok = False
+                                break
+                    if ok:
+                        pads.append(LEDPad(cx_mm, cy_mm, 1.0, 0.0))
+                x += col_step
+            y += row_step
+            row += 1
+        return pads
+
+
+    def place_leds_domino(
+        self,
+        routing_mask: np.ndarray,
+        check_mask: np.ndarray,
+        gap_mm: float,
+    ) -> List[LEDPad]:
+        """
+        Domino strategy — centre-to-centre distance D = gap_mm (NOT Ø+gap).
+
+        Algorithm (per contour):
+          1. Place the first centre on the path.
+          2. From that centre, walk forward along the path until the
+             Euclidean distance reaches exactly D (circle of radius D
+             intersecting the outline).
+          3. That intersection is the next centre; repeat.
+
+        Result: consecutive LEDs are exactly D apart centre-to-centre,
+        following the text like a chain of dominoes.
+        """
+        # D is pure centre-to-centre (user's gap value)
+        D_mm = max(0.3, float(gap_mm))
+        D_px = D_mm * self.px_per_mm
+        D2 = D_px * D_px
+
+        pads_native: List[Tuple[float, float, float, float]] = []
+
+        binary = (routing_mask > 0).astype(np.uint8)
+        contours, _ = cv2.findContours(
+            binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE
+        )
+
+        for c in contours:
+            peri = float(cv2.arcLength(c, True))
+            if peri < D_px:
+                continue
+
+            pts = c.reshape(-1, 2).astype(np.float64)
+            if len(pts) < 4:
+                continue
+
+            # Closed ring of points
+            closed = np.vstack([pts, pts[:1]])
+            nseg = len(closed) - 1
+
+            def tangent_at(i: int) -> Tuple[float, float]:
+                j = min(i + 1, nseg)
+                dx = float(closed[j, 0] - closed[max(i - 1, 0), 0])
+                dy = float(closed[j, 1] - closed[max(i - 1, 0), 1])
+                L = float(np.hypot(dx, dy))
+                if L < 1e-9:
+                    return 1.0, 0.0
+                return dx / L, dy / L
+
+            def to_mm(pt) -> Tuple[float, float]:
+                return float(pt[0]) / self.px_per_mm, float(pt[1]) / self.px_per_mm
+
+            # --- seed: first point on contour ---
+            i0 = 0
+            tx, ty = tangent_at(i0)
+            cx, cy = to_mm(closed[i0])
+            pads_native.append((cx, cy, tx, ty))
+            last = closed[i0].copy()
+            start = last.copy()
+            seg_cursor = 0  # only search forward from here
+
+            max_leds_on_contour = max(2, int(peri / D_px) + 2)
+
+            for _ in range(max_leds_on_contour):
+                found = False
+                best_pt = None
+                best_tang = (1.0, 0.0)
+                best_seg = seg_cursor
+
+                # Walk segments forward (wrap once around the closed loop)
+                for k in range(nseg):
+                    i = (seg_cursor + k) % nseg
+                    p1 = closed[i]
+                    p2 = closed[i + 1]
+                    dvec = p2 - p1
+                    f = p1 - last
+                    a_coef = float(dvec[0] * dvec[0] + dvec[1] * dvec[1])
+                    b_coef = 2.0 * float(f[0] * dvec[0] + f[1] * dvec[1])
+                    c_coef = float(f[0] * f[0] + f[1] * f[1]) - D2
+                    if a_coef < 1e-12:
+                        continue
+                    disc = b_coef * b_coef - 4.0 * a_coef * c_coef
+                    if disc < 0.0:
+                        continue
+                    sqrt_disc = float(disc ** 0.5)
+                    candidates = []
+                    for sign in (-1.0, 1.0):
+                        a = (-b_coef + sign * sqrt_disc) / (2.0 * a_coef)
+                        if 0.0 <= a <= 1.0:
+                            candidates.append(a)
+                    if not candidates:
+                        continue
+                    # Prefer the intersection further along this segment
+                    a = max(candidates)
+                    pt = p1 + a * dvec
+                    dist_last = float(np.hypot(pt[0] - last[0], pt[1] - last[1]))
+                    if dist_last < D_px * 0.85:
+                        continue
+                    L = float(np.hypot(dvec[0], dvec[1]))
+                    best_tang = (
+                        (1.0, 0.0) if L < 1e-9 else (float(dvec[0] / L), float(dvec[1] / L))
+                    )
+                    best_pt = pt
+                    best_seg = i
+                    found = True
+                    break
+
+                if not found or best_pt is None:
+                    break
+
+                # Closed the loop — stop before overlapping the first LED
+                if float(np.hypot(best_pt[0] - start[0], best_pt[1] - start[1])) < D_px * 0.5:
+                    break
+
+                tx, ty = best_tang
+                cx, cy = to_mm(best_pt)
+                pads_native.append((cx, cy, tx, ty))
+                last = best_pt.copy()
+                seg_cursor = best_seg  # continue forward from this segment
+
+        # Global floor: no two centres closer than D (across contours too)
+        final: List[LEDPad] = []
+        min_d2 = D_mm ** 2
+        for r in pads_native:
+            if all(
+                (r[0] - q.x_mm) ** 2 + (r[1] - q.y_mm) ** 2 >= min_d2 * 0.95
+                for q in final
+            ):
+                final.append(LEDPad(*r))
+        return final
+
+    def place_by_mode(
+        self,
+        thick_mask: np.ndarray,
+        gap_mm: float,
+        placement_mode: str,
+    ) -> List[LEDPad]:
+        """Route LEDs according to strategy mode."""
+        mode = (placement_mode or "edges").lower().replace(" ", "_")
+        check = cv2.dilate(thick_mask, np.ones((3, 3), np.uint8))
+
+        if mode in ("centerline", "classic_centerline"):
+            routing = self.get_skeleton(thick_mask)
+            return self.place_leds(routing, thick_mask, gap_mm)
+
+        if mode in ("domino", "domino_edges"):
+            return self.place_leds_domino(thick_mask, check, gap_mm)
+
+        if mode in ("domino_centerline", "domino_skeleton"):
+            # Domino along medial axis — densify skeleton so thin strokes
+            # still yield a continuous path (avoids under-fitting).
+            routing = self.get_skeleton(thick_mask)
+            if cv2.countNonZero(routing) == 0:
+                routing = thick_mask
+            # Connect broken skeleton pixels, then keep inside the glyph
+            routing = cv2.dilate(routing, np.ones((3, 3), np.uint8))
+            routing = cv2.bitwise_and(routing, thick_mask)
+            # One more light close to bridge 1-pixel gaps
+            routing = cv2.morphologyEx(
+                routing, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8)
+            )
+            routing = cv2.bitwise_and(routing, thick_mask)
+            if cv2.countNonZero(routing) == 0:
+                routing = thick_mask
+            check = cv2.dilate(routing, np.ones((5, 5), np.uint8))
+            check = cv2.bitwise_and(check, thick_mask)
+            return self.place_leds_domino(routing, check, gap_mm)
+
+        if mode == "fill":
+            edge_pads = self.place_leds_domino(thick_mask, check, gap_mm)
+            fill_pads = self.place_interior_fill(thick_mask, gap_mm, existing=edge_pads)
+            return edge_pads + fill_pads
+
+        # default: classic edges (corners preferred)
+        return self.place_leds(thick_mask, check, gap_mm)
 
     def _is_on_mask(self, px_mm: float, py_mm: float, mask: np.ndarray) -> bool:
         x_px = int(round(px_mm * self.px_per_mm))
@@ -265,28 +522,28 @@ class CoreEngine:
         return bool(mask[y_px, x_px] > 0)
 
     # ------------------------------------------------------------------
-    # 4. Binary search for max-LED pitch
+    # 4. Binary search for max-LED gap
     # ------------------------------------------------------------------
-    def find_pitch_for_max_leds(
+    def find_gap_for_max_leds(
         self,
         routing_mask: np.ndarray,
         check_mask: np.ndarray,
         max_leds: int,
-        pitch_min: float = 3.0,
-        pitch_max: float = 30.0,
+        gap_min: float = 0.5,
+        gap_max: float = 30.0,
         tol: int = 3,
     ) -> Tuple[float, List[LEDPad]]:
         """
-        Binary search over pitch so that len(pads) is as close as possible
-        to max_leds without exceeding it (prefer under over over).
+        Binary search over edge-to-edge gap so that len(pads) is as close as
+        possible to max_leds without exceeding it.
 
-        Returns (best_pitch, pads).
+        Returns (best_gap_mm, pads).
         """
-        lo = max(2.0, float(pitch_min))
-        hi = max(lo + 0.5, float(pitch_max))
+        lo = max(0.0, float(gap_min))
+        hi = max(lo + 0.5, float(gap_max))
 
         best_pads: List[LEDPad] = []
-        best_pitch = hi
+        best_gap = hi
         best_n = -1
 
         for _ in range(20):
@@ -294,23 +551,25 @@ class CoreEngine:
             pads = self.place_leds(routing_mask, check_mask, mid)
             n = len(pads)
 
-            # Keep densest solution that stays ≤ max_leds
             if n <= max_leds and n > best_n:
                 best_pads = pads
-                best_pitch = mid
+                best_gap = mid
                 best_n = n
 
             if n > max_leds:
-                lo = mid  # too dense → larger pitch
+                # too dense → increase gap
+                lo = mid
             else:
-                hi = mid  # room for denser packing → smaller pitch
+                # room for denser packing → decrease gap
+                hi = mid
 
             if abs(n - max_leds) <= tol and n <= max_leds:
                 return mid, pads
 
         if not best_pads:
-            best_pads = self.place_leds(routing_mask, check_mask, best_pitch)
-        return best_pitch, best_pads
+            best_pads = self.place_leds(routing_mask, check_mask, best_gap)
+        return best_gap, best_pads
+
 
     # ------------------------------------------------------------------
     # 5. Full generation pipeline
@@ -323,16 +582,19 @@ class CoreEngine:
         language_dir: str = "LTR",
         desired_width_mm: float = 600.0,
         desired_height_mm: float = 0.0,
-        placement_mode: str = "edges",  # "edges" | "centerline"
+        placement_mode: str = "edges",  # "edges" | "centerline" | "fill" | "domino"
         max_leds: Optional[int] = None,
-        pitch_mm: float = 6.0,
-        pitch_min: float = 3.0,
-        pitch_max: float = 25.0,
+        gap_mm: float = 1.0,
+        gap_min: float = 0.5,
+        gap_max: float = 25.0,
     ) -> PlacementResult:
         """
         Full pipeline: render → scale → route → place LEDs.
-        If max_leds is given, pitch is adapted via binary search.
-        Provide font_path and/or font_family (family is used when path is missing).
+
+        gap_mm = edge-to-edge distance between LED bodies.
+        Centre spacing = led_dia_mm + gap_mm.
+
+        If max_leds is given, pads are trimmed after placement (gap stays fixed).
         """
         raw_mask = self.render_text_mask(
             text,
@@ -348,15 +610,28 @@ class CoreEngine:
         current_w_mm = w / self.px_per_mm
         current_h_mm = h / self.px_per_mm
 
-        if desired_width_mm > 0:
+        # Fit the design inside the given box (contain).
+        # Use the largest scale that keeps both axes within limits.
+        # Never enlarge beyond 1:1 of the rendered mask (no upscaling).
+        scale = 1.0
+        if desired_width_mm > 0 and current_w_mm > 0:
+            scale = min(scale, desired_width_mm / current_w_mm)
+        if desired_height_mm > 0 and current_h_mm > 0:
+            scale = min(scale, desired_height_mm / current_h_mm)
+        # If user only set width (height=0), still allow scaling up to that width
+        # so a target physical size works as before — but when BOTH are set,
+        # contain-fit applies and we do not blow past either edge.
+        if desired_width_mm > 0 and desired_height_mm <= 0 and current_w_mm > 0:
             scale = desired_width_mm / current_w_mm
-        elif desired_height_mm > 0:
+        elif desired_height_mm > 0 and desired_width_mm <= 0 and current_h_mm > 0:
             scale = desired_height_mm / current_h_mm
-        else:
-            scale = 1.0
+        elif desired_width_mm > 0 and desired_height_mm > 0:
+            sw = desired_width_mm / current_w_mm if current_w_mm > 0 else 1.0
+            sh = desired_height_mm / current_h_mm if current_h_mm > 0 else 1.0
+            scale = min(sw, sh)  # fit inside box, no crop
 
-        final_w_px = max(1, int(w * scale))
-        final_h_px = max(1, int(h * scale))
+        final_w_px = max(1, int(round(w * scale)))
+        final_h_px = max(1, int(round(h * scale)))
         final_w_mm = final_w_px / self.px_per_mm
         final_h_mm = final_h_px / self.px_per_mm
 
@@ -364,28 +639,31 @@ class CoreEngine:
             cropped, (final_w_px, final_h_px), interpolation=cv2.INTER_NEAREST
         )
 
-        if placement_mode == "centerline":
-            routing_mask = self.get_skeleton(thick_mask)
-            check_mask = thick_mask
-        else:
-            routing_mask = thick_mask
-            check_mask = cv2.dilate(thick_mask, np.ones((3, 3), np.uint8))
+        # Gap is FIXED — never widened for "max LEDs".
+        # Max LEDs only trims excess pads after placement at the true gap.
+        user_gap = max(0.0, float(gap_mm))
+        mode = (placement_mode or "edges").lower()
+        used_gap = user_gap
+        pads = self.place_by_mode(thick_mask, used_gap, mode)
 
-        if max_leds is not None and max_leds > 0:
-            used_pitch, pads = self.find_pitch_for_max_leds(
-                routing_mask, check_mask, max_leds, pitch_min, pitch_max
-            )
+        if max_leds is not None and max_leds > 0 and len(pads) > max_leds:
+            # Keep first max_leds in path order (already roughly sequential)
+            pads = pads[: int(max_leds)]
+
+        if mode in ("domino", "domino_edges", "domino_centerline", "domino_skeleton"):
+            spacing = max(0.3, float(used_gap))  # gap IS centre-to-centre
         else:
-            used_pitch = pitch_mm
-            pads = self.place_leds(routing_mask, check_mask, used_pitch)
+            spacing = self.center_spacing_mm(used_gap)
 
         return PlacementResult(
             pads=pads,
             mask=thick_mask,
             final_w_mm=final_w_mm,
             final_h_mm=final_h_mm,
-            pitch_mm=used_pitch,
+            gap_mm=used_gap,
+            spacing_mm=spacing,
             scale=scale,
+            led_dia_mm=float(self.led_dia_mm),
             underlay=thick_mask,
         )
 
@@ -456,7 +734,13 @@ class CoreEngine:
         overlap_mm: float = 20.0,
         smart: bool = True,
     ) -> List[TileRect]:
-        """Generate a list of TileRect covering the design."""
+        """
+        Generate TileRects covering the design.
+
+        Same grid logic as before, but tiles are always full paper size and
+        may extend *past* the design border so LEDs on the edge are not
+        clipped when printing.
+        """
         part_w, part_h = get_paper_dims(paper, orientation)
         canvas_w_px = int(result.final_w_mm * self.print_dpi / 25.4)
         canvas_h_px = int(result.final_h_mm * self.print_dpi / 25.4)
@@ -465,48 +749,60 @@ class CoreEngine:
             result.mask, (canvas_w_px, canvas_h_px), interpolation=cv2.INTER_AREA
         )
 
+        # Bleed so edge LEDs sit inside the tile, not on the cut line
+        bleed_mm = max(float(getattr(result, "led_dia_mm", 5.0) or 5.0), 5.0) + 3.0
+        bleed_px = int(bleed_mm * self.print_dpi / 25.4)
+
         if smart:
             ys, xs = np.where(underlay > 128)
             if len(xs) and len(ys):
-                min_x = max(0, int(np.min(xs)) - 50)
-                max_x = min(canvas_w_px, int(np.max(xs)) + 50)
-                min_y = max(0, int(np.min(ys)) - 50)
-                max_y = min(canvas_h_px, int(np.max(ys)) + 50)
+                min_x = int(np.min(xs)) - bleed_px
+                max_x = int(np.max(xs)) + bleed_px
+                min_y = int(np.min(ys)) - bleed_px
+                max_y = int(np.max(ys)) + bleed_px
             else:
-                min_x, max_x, min_y, max_y = 0, canvas_w_px, 0, canvas_h_px
+                min_x, max_x, min_y, max_y = -bleed_px, canvas_w_px + bleed_px, -bleed_px, canvas_h_px + bleed_px
         else:
-            min_x, max_x, min_y, max_y = 0, canvas_w_px, 0, canvas_h_px
+            min_x, max_x = -bleed_px, canvas_w_px + bleed_px
+            min_y, max_y = -bleed_px, canvas_h_px + bleed_px
 
         part_w_px = int(part_w * self.print_dpi / 25.4)
         part_h_px = int(part_h * self.print_dpi / 25.4)
         overlap_px = int(overlap_mm * self.print_dpi / 25.4)
+        step_x = max(1, part_w_px - overlap_px)
+        step_y = max(1, part_h_px - overlap_px)
 
         work_w = max_x - min_x
         work_h = max_y - min_y
-        cols = math.ceil(work_w / (part_w_px - overlap_px)) if work_w > 0 else 1
-        rows = math.ceil(work_h / (part_h_px - overlap_px)) if work_h > 0 else 1
+        cols = math.ceil(work_w / step_x) if work_w > 0 else 1
+        rows = math.ceil(work_h / step_y) if work_h > 0 else 1
 
         tiles: List[TileRect] = []
         idx = 1
         for row in range(rows):
             for col in range(cols):
-                start_x = min_x + col * (part_w_px - overlap_px)
-                start_y = min_y + row * (part_h_px - overlap_px)
-                end_x = min(start_x + part_w_px, canvas_w_px)
-                end_y = min(start_y + part_h_px, canvas_h_px)
+                start_x = min_x + col * step_x
+                start_y = min_y + row * step_y
+                # Full paper size — may extend past the design border
+                end_x = start_x + part_w_px
+                end_y = start_y + part_h_px
 
                 if smart:
-                    slice_mask = underlay[start_y:end_y, start_x:end_x]
+                    # Content test against the real design (clamped sample)
+                    csx = max(0, start_x)
+                    csy = max(0, start_y)
+                    cex = min(canvas_w_px, end_x)
+                    cey = min(canvas_h_px, end_y)
+                    if cex <= csx or cey <= csy:
+                        continue
+                    slice_mask = underlay[csy:cey, csx:cex]
                     if not np.any(slice_mask > 128):
                         continue
 
-                # convert to mm
                 x_mm = start_x * 25.4 / self.print_dpi
                 y_mm = start_y * 25.4 / self.print_dpi
-                w_mm = (end_x - start_x) * 25.4 / self.print_dpi
-                h_mm = (end_y - start_y) * 25.4 / self.print_dpi
                 tiles.append(
-                    TileRect(x_mm, y_mm, w_mm, h_mm, label=f"P{idx}")
+                    TileRect(x_mm, y_mm, part_w, part_h, label=f"P{idx}")
                 )
                 idx += 1
         return tiles
@@ -520,8 +816,14 @@ class CoreEngine:
         paper: str = "A4",
         orientation: str = "portrait",
     ) -> List[Path]:
-        """Crop the master canvas according to the given tiles and save JPGs."""
+        """
+        Crop the master according to tiles and save JPGs.
+
+        Tiles may extend past the design border; out-of-bounds areas are
+        filled white so edge LEDs still print fully inside the paper.
+        """
         master = self.render_master_jpg(result, pads=pads)
+        mh, mw = master.shape[:2]
         part_w, part_h = get_paper_dims(paper, orientation)
         part_w_px = int(part_w * self.print_dpi / 25.4)
         part_h_px = int(part_h * self.print_dpi / 25.4)
@@ -531,24 +833,33 @@ class CoreEngine:
         saved: List[Path] = []
 
         for i, t in enumerate(tiles, 1):
-            sx = int(t.x_mm * self.print_dpi / 25.4)
-            sy = int(t.y_mm * self.print_dpi / 25.4)
-            ex = int((t.x_mm + t.w_mm) * self.print_dpi / 25.4)
-            ey = int((t.y_mm + t.h_mm) * self.print_dpi / 25.4)
+            # Tile rect in master pixel space (may be negative / past edges)
+            sx = int(round(t.x_mm * self.print_dpi / 25.4))
+            sy = int(round(t.y_mm * self.print_dpi / 25.4))
+            tw = int(round(t.w_mm * self.print_dpi / 25.4))
+            th = int(round(t.h_mm * self.print_dpi / 25.4))
+            # Prefer full paper size on the page
+            page_w = max(tw, part_w_px)
+            page_h = max(th, part_h_px)
+            page = np.full((page_h, page_w, 3), 255, np.uint8)
 
-            sx = max(0, sx)
-            sy = max(0, sy)
-            ex = min(master.shape[1], ex)
-            ey = min(master.shape[0], ey)
+            # Region of tile that overlaps the master
+            src_x0 = max(0, sx)
+            src_y0 = max(0, sy)
+            src_x1 = min(mw, sx + tw)
+            src_y1 = min(mh, sy + th)
 
-            slice_img = master[sy:ey, sx:ex]
-            page = np.full((part_h_px, part_w_px, 3), 255, np.uint8)
-            page[0 : slice_img.shape[0], 0 : slice_img.shape[1]] = slice_img
+            if src_x1 > src_x0 and src_y1 > src_y0:
+                dst_x0 = src_x0 - sx  # where that lands on the page
+                dst_y0 = src_y0 - sy
+                slice_img = master[src_y0:src_y1, src_x0:src_x1]
+                dh, dw = slice_img.shape[:2]
+                page[dst_y0 : dst_y0 + dh, dst_x0 : dst_x0 + dw] = slice_img
 
             cv2.rectangle(
                 page,
                 (0, 0),
-                (slice_img.shape[1], slice_img.shape[0]),
+                (page_w - 1, page_h - 1),
                 (200, 200, 200),
                 2,
             )
